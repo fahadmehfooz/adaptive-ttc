@@ -13,8 +13,8 @@ import subprocess
 import sys
 
 # ---- EDIT THESE PER RUN -----------------------------------------------------
-REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc-paper.git"
-STAGE = "rollouts"            # "smoke" | "rollouts" | "eval"
+REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
+STAGE = "smoke"               # "smoke" | "rollouts" | "eval"
 ARGS = "--dataset gsm8k --model qwen-1.5b --backend vllm --n 16 --limit 500"
 # -----------------------------------------------------------------------------
 
