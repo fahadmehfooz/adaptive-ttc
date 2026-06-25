@@ -14,7 +14,7 @@ import sys
 
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
-STAGE = "gpucheck"            # "gpucheck" | "smoke" | "rollouts" | "eval"
+STAGE = "rollouts"           # "gpucheck" | "smoke" | "rollouts" | "eval"
 ARGS = "--dataset gsm8k --model qwen-1.5b --backend hf --n 8 --limit 16"
 # -----------------------------------------------------------------------------
 
@@ -35,12 +35,17 @@ def main():
     # Point outputs/ at the persisted Kaggle working dir.
     sh(f"rm -rf {REPO}/outputs && ln -s {WORK}/outputs {REPO}/outputs && mkdir -p {WORK}/outputs")
 
-    # IMPORTANT: do NOT `pip install -r requirements.txt` on Kaggle. It upgrades the
-    # CUDA-matched torch to a generic wheel and breaks the GPU with
-    # `cudaErrorNoKernelImageForDevice`. Kaggle preinstalls torch/transformers/datasets/
-    # numpy/pandas/scikit-learn/joblib/matplotlib — we rely on those as-is.
-    if STAGE == "rollouts" and "vllm" in ARGS:  # vLLM only when that backend is selected
-        sh("pip install -q vllm")
+    # Do NOT `pip install -r requirements.txt` on Kaggle — it perturbs the preinstalled stack.
+    # Kaggle preinstalls torch/transformers/datasets/numpy/pandas/scikit-learn/joblib/matplotlib.
+    #
+    # BUT: Kaggle's GPU kernels are assigned a Tesla P100 (sm_60), and the stock torch
+    # (2.10+cu128) dropped Pascal — arch_list is sm_70+ only -> cudaErrorNoKernelImageForDevice.
+    # For the hf backend we install a cu121 torch build that still includes sm_60 kernels.
+    if STAGE == "rollouts":
+        if "vllm" in ARGS:
+            sh("pip install -q vllm")  # NOTE: vLLM also dropped Pascal; needs a T4, not P100.
+        else:
+            sh("pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121")
 
     if STAGE == "gpucheck":
         sh('nvidia-smi || true')
