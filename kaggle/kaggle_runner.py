@@ -14,8 +14,8 @@ import sys
 
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
-STAGE = "smoke"               # "smoke" | "rollouts" | "eval"
-ARGS = "--dataset gsm8k --model qwen-1.5b --backend vllm --n 16 --limit 500"
+STAGE = "rollouts"            # "smoke" | "rollouts" | "eval"
+ARGS = "--dataset gsm8k --model qwen-1.5b --backend hf --n 8 --limit 16"
 # -----------------------------------------------------------------------------
 
 WORK = "/kaggle/working"
@@ -36,7 +36,7 @@ def main():
     sh(f"rm -rf {REPO}/outputs && ln -s {WORK}/outputs {REPO}/outputs && mkdir -p {WORK}/outputs")
 
     sh("pip install -q -r requirements.txt")
-    if STAGE == "rollouts":  # vLLM only needed for real generation
+    if STAGE == "rollouts" and "vllm" in ARGS:  # vLLM only when that backend is selected
         sh("pip install -q vllm")
 
     if STAGE == "smoke":
