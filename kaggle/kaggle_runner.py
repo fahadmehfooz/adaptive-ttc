@@ -14,7 +14,7 @@ import sys
 
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
-STAGE = "rollouts"            # "smoke" | "rollouts" | "eval"
+STAGE = "gpucheck"            # "gpucheck" | "smoke" | "rollouts" | "eval"
 ARGS = "--dataset gsm8k --model qwen-1.5b --backend hf --n 8 --limit 16"
 # -----------------------------------------------------------------------------
 
@@ -42,7 +42,18 @@ def main():
     if STAGE == "rollouts" and "vllm" in ARGS:  # vLLM only when that backend is selected
         sh("pip install -q vllm")
 
-    if STAGE == "smoke":
+    if STAGE == "gpucheck":
+        sh('nvidia-smi || true')
+        sh('python -c "'
+           'import torch; '
+           "print('torch', torch.__version__, '| cuda', torch.version.cuda); "
+           "print('available', torch.cuda.is_available()); "
+           "print('device', torch.cuda.get_device_name(0)); "
+           "print('capability sm_', torch.cuda.get_device_capability(0)); "
+           "print('arch_list', torch.cuda.get_arch_list()); "
+           "x = torch.randn(4, device='cuda'); print('basic cuda op:', float((x+1).sum()))"
+           '"')
+    elif STAGE == "smoke":
         sh("python -m scripts.smoke_test")
     elif STAGE == "rollouts":
         sh(f"python -m scripts.run_rollouts {ARGS}")
