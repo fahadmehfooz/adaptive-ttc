@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Data + outputs are regenerable — never commit
+data/hf_cache/
+outputs/*
+!outputs/.gitkeep
+
+# Stray tool files
+.Rhistory
+.Rapp.history
+
+# PRIVATE working docs — never push to GitHub (local source of truth only)
+CLAUDE.md
+PLAN.md
+notes/
+
+# Kaggle credentials — NEVER commit
+kaggle.json
+.kaggle/
