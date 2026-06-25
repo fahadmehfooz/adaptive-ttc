@@ -45,7 +45,10 @@ def main():
         if "vllm" in ARGS:
             sh("pip install -q vllm")  # NOTE: vLLM also dropped Pascal; needs a T4, not P100.
         else:
-            sh("pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121")
+            # Install matching torch+torchvision from cu121 (torchvision must match torch's ABI,
+            # else `torchvision::nms does not exist` breaks transformers' model import).
+            sh("pip install -q torch==2.5.1 torchvision==0.20.1 "
+               "--index-url https://download.pytorch.org/whl/cu121")
 
     if STAGE == "gpucheck":
         sh('nvidia-smi || true')
