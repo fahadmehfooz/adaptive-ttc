@@ -35,7 +35,10 @@ def main():
     # Point outputs/ at the persisted Kaggle working dir.
     sh(f"rm -rf {REPO}/outputs && ln -s {WORK}/outputs {REPO}/outputs && mkdir -p {WORK}/outputs")
 
-    sh("pip install -q -r requirements.txt")
+    # IMPORTANT: do NOT `pip install -r requirements.txt` on Kaggle. It upgrades the
+    # CUDA-matched torch to a generic wheel and breaks the GPU with
+    # `cudaErrorNoKernelImageForDevice`. Kaggle preinstalls torch/transformers/datasets/
+    # numpy/pandas/scikit-learn/joblib/matplotlib — we rely on those as-is.
     if STAGE == "rollouts" and "vllm" in ARGS:  # vLLM only when that backend is selected
         sh("pip install -q vllm")
 
