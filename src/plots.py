@@ -15,7 +15,7 @@ def cost_accuracy(points, out_path, title="Cost vs accuracy"):
         groups.setdefault(key, []).append(p)
 
     styles = {"fixed budget": "o-", "esc": "P", "adaptive-confidence": "s--",
-              "adaptive-agreement": "^:"}
+              "adaptive-agreement": "^:", "adaptive-trained": "D-"}
     fig, ax = plt.subplots(figsize=(6, 4))
     for key, pts in groups.items():
         pts = sorted(pts, key=lambda p: p["mean_cost"])

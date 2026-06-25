@@ -16,11 +16,17 @@ def main():
     ap.add_argument("--rollouts", required=True)
     ap.add_argument("--k0", type=int, default=4)
     ap.add_argument("--kmax", type=int, default=config.SAMPLING["n"])
+    ap.add_argument("--gate", default=None, help="path to a trained gate .joblib (adds its sweep)")
     args = ap.parse_args()
 
     config.ensure_dirs()
     rows = ev.load_rollouts(args.rollouts)
     points = ev.baselines_and_adaptive(rows, k0=args.k0, kmax=args.kmax)
+
+    if args.gate:
+        from src import gate as gatemod
+        gm = gatemod.TrainedGate.load(args.gate)
+        points += ev.trained_gate_sweep(rows, gm, k0=args.k0, kmax=args.kmax)
 
     tag = os.path.splitext(os.path.basename(args.rollouts))[0]
     results_path = os.path.join(config.RESULTS_DIR, f"{tag}.json")

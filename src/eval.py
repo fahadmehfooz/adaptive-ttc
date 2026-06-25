@@ -100,6 +100,22 @@ def adaptive(rows, decide, k0, kmax):
     return {"mean_cost": cost / n, "accuracy": correct / n}
 
 
+def trained_gate_sweep(rows, gate_model, k0=4, kmax=16, thresholds=None):
+    """Adaptive policy driven by a trained gate: stop if P(correct | first-k0 features) >= t.
+    Sweeps t -> cost-accuracy curve. `gate_model` is a fitted gate.TrainedGate."""
+    if thresholds is None:
+        thresholds = [i / 10 for i in range(2, 10)]  # 0.2 .. 0.9
+    pts = []
+    for t in thresholds:
+        res = adaptive(
+            rows,
+            lambda head, t=t: gate_model.predict_proba(gate.features(head)) >= t,
+            k0, kmax,
+        )
+        pts.append({"policy": "adaptive-trained", "threshold": t, **res})
+    return pts
+
+
 def agreement_sweep(rows, k0=4, kmax=16, thresholds=None):
     """Sweep the agreement threshold -> a cost-accuracy curve."""
     if thresholds is None:
