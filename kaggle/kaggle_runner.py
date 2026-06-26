@@ -15,7 +15,7 @@ import sys
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
 STAGE = "rollouts"           # "gpucheck" | "smoke" | "rollouts" | "eval"
-ARGS = "--dataset gsm8k --model qwen-1.5b --backend hf --n 16 --limit 500"
+ARGS = "--dataset gsm8k --model qwen-0.5b --backend hf --n 16 --limit 500"
 # -----------------------------------------------------------------------------
 
 WORK = "/kaggle/working"
