@@ -32,9 +32,12 @@ class FakeSampler:
 
 
 class HFSampler:
-    """transformers backend. Works on CPU (slow) or GPU. Applies the chat template."""
+    """transformers backend. Works on CPU (slow) or GPU. Applies the chat template.
 
-    def __init__(self, model_key, **_):
+    `gen_batch` caps how many sequences are generated per forward pass — keep it small for
+    large models (7B/8B) on a 16 GB GPU to avoid OOM; n is split into gen_batch-sized chunks."""
+
+    def __init__(self, model_key, gen_batch=16, **_):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         model_id = config.MODELS[model_key]
@@ -45,6 +48,7 @@ class HFSampler:
             device_map="auto" if torch.cuda.is_available() else None,
         )
         self.s = config.SAMPLING
+        self.gen_batch = int(gen_batch)
 
     def sample(self, problems, n):
         import torch
@@ -53,14 +57,20 @@ class HFSampler:
             msgs = [{"role": "user", "content": data.build_prompt(p)}]
             text = self.tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
             inputs = self.tok(text, return_tensors="pt").to(self.model.device)
-            with torch.no_grad():
-                gen = self.model.generate(
-                    **inputs, do_sample=True, num_return_sequences=n,
-                    temperature=self.s["temperature"], top_p=self.s["top_p"],
-                    max_new_tokens=self.s["max_new_tokens"],
-                    pad_token_id=self.tok.eos_token_id,
-                )
-            decoded = self.tok.batch_decode(gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+            decoded = []
+            remaining = n
+            while remaining > 0:
+                b = min(self.gen_batch, remaining)
+                with torch.no_grad():
+                    gen = self.model.generate(
+                        **inputs, do_sample=True, num_return_sequences=b,
+                        temperature=self.s["temperature"], top_p=self.s["top_p"],
+                        max_new_tokens=self.s["max_new_tokens"],
+                        pad_token_id=self.tok.eos_token_id,
+                    )
+                decoded += self.tok.batch_decode(
+                    gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+                remaining -= b
             out.append(decoded)
         return out
 

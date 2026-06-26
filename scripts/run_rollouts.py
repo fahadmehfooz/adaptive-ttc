@@ -19,11 +19,14 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--split", default="test")
     ap.add_argument("--quantization", default=None, help="e.g. awq for 7B/8B on 16GB")
+    ap.add_argument("--gen-batch", type=int, default=16,
+                    help="hf: sequences per forward pass; lower (e.g. 4) for 7B/8B to avoid OOM")
     args = ap.parse_args()
 
     config.ensure_dirs()
     problems = data.load_problems(args.dataset, limit=args.limit, split=args.split)
-    sampler = sampling.get_sampler(args.backend, args.model, quantization=args.quantization)
+    sampler = sampling.get_sampler(args.backend, args.model,
+                                   quantization=args.quantization, gen_batch=args.gen_batch)
 
     out_path = os.path.join(config.ROLLOUTS_DIR, f"{args.dataset}_{args.model}.jsonl")
 

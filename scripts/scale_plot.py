@@ -37,7 +37,7 @@ def best_saving(rows, method, k0, kmax):
     """Iso-accuracy compute saving of `method` vs full budget (1 - cost/kmax)."""
     full_acc = ev.fixed_budget(rows, kmax)["accuracy"]
     pts = ev.baselines_and_adaptive(rows, k0=k0, kmax=kmax)
-    mpts = [p for p in pts if p["policy"] == method and p["accuracy"] >= full_acc - 0.005]
+    mpts = [p for p in pts if p["policy"] == method and p["accuracy"] >= full_acc - 0.01]
     if not mpts:
         return None
     return 1 - min(p["mean_cost"] for p in mpts) / kmax

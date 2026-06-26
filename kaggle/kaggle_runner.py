@@ -14,14 +14,16 @@ import sys
 
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
-STAGE = "rollouts"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
+STAGE = "rollouts_many"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
 ARGS = "--dataset gsm8k --model qwen-0.5b --backend hf --n 16 --limit 500"
 
 # For STAGE="rollouts_many": run several rollouts in ONE GPU session (one torch install,
 # models cached within the session) — far cheaper on quota than one kernel per config.
 JOBS = [
-    "--dataset math500 --model qwen-1.5b --backend hf --n 16 --limit 500",
     "--dataset bbh     --model qwen-1.5b --backend hf --n 16 --limit 500",
+    "--dataset math500 --model qwen-1.5b --backend hf --n 16 --limit 500",
+    "--dataset bbh     --model qwen-0.5b --backend hf --n 16 --limit 500",
+    "--dataset math500 --model qwen-0.5b --backend hf --n 16 --limit 500",
 ]
 # -----------------------------------------------------------------------------
 
@@ -77,8 +79,12 @@ def main():
     elif STAGE == "rollouts":
         sh(f"python -m scripts.run_rollouts {ARGS}")
     elif STAGE == "rollouts_many":
+        # Resilient: a failing job (e.g. one dataset loader) must not kill the rest.
         for j in JOBS:
-            sh(f"python -m scripts.run_rollouts {j}")
+            try:
+                sh(f"python -m scripts.run_rollouts {j}")
+            except subprocess.CalledProcessError as e:
+                print(f"!! JOB FAILED (continuing): {j}\n   {e}", file=sys.stderr)
     elif STAGE == "eval":
         sh(f"python -m scripts.run_eval {ARGS}")
     else:

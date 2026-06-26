@@ -22,7 +22,7 @@ def full_budget_acc(rows, kmax):
     return ev.fixed_budget(rows, kmax)["accuracy"]
 
 
-def best_cost_at_acc(points, target_acc, tol=0.005):
+def best_cost_at_acc(points, target_acc, tol=0.01):
     """Cheapest policy point that reaches (target_acc - tol). None if none qualifies."""
     ok = [p for p in points if p["accuracy"] >= target_acc - tol]
     return min((p["mean_cost"] for p in ok), default=None)
