@@ -25,8 +25,12 @@ def normalize(s, kind):
         return None
     s = s.strip().strip(".").strip("$").strip("()").replace(",", "").replace(" ", "")
     if kind == "number":
-        m = re.search(r"-?\d+\.?\d*", s)
-        return m.group(0).rstrip("0").rstrip(".") if m and "." in m.group(0) else (m.group(0) if m else s)
+        # GSM8K convention: the final answer is the LAST number stated.
+        nums = re.findall(r"-?\d+\.?\d*", s)
+        if not nums:
+            return s
+        v = nums[-1]
+        return v.rstrip("0").rstrip(".") if "." in v else v
     return s.lower()
 
 
