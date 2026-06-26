@@ -14,8 +14,15 @@ import sys
 
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
-STAGE = "rollouts"           # "gpucheck" | "smoke" | "rollouts" | "eval"
+STAGE = "rollouts"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
 ARGS = "--dataset gsm8k --model qwen-0.5b --backend hf --n 16 --limit 500"
+
+# For STAGE="rollouts_many": run several rollouts in ONE GPU session (one torch install,
+# models cached within the session) — far cheaper on quota than one kernel per config.
+JOBS = [
+    "--dataset math500 --model qwen-1.5b --backend hf --n 16 --limit 500",
+    "--dataset bbh     --model qwen-1.5b --backend hf --n 16 --limit 500",
+]
 # -----------------------------------------------------------------------------
 
 WORK = "/kaggle/working"
@@ -41,14 +48,18 @@ def main():
     # BUT: Kaggle's GPU kernels are assigned a Tesla P100 (sm_60), and the stock torch
     # (2.10+cu128) dropped Pascal — arch_list is sm_70+ only -> cudaErrorNoKernelImageForDevice.
     # For the hf backend we install a cu121 torch build that still includes sm_60 kernels.
-    if STAGE == "rollouts":
-        if "vllm" in ARGS:
+    # Install matching torch+torchvision from cu121 (sm_60 P100 support; torchvision must match
+    # torch's ABI or `torchvision::nms does not exist` breaks transformers' model import).
+    def install_p100_torch():
+        sh("pip install -q torch==2.5.1 torchvision==0.20.1 "
+           "--index-url https://download.pytorch.org/whl/cu121")
+
+    if STAGE in ("rollouts", "rollouts_many"):
+        all_args = ARGS if STAGE == "rollouts" else " ".join(JOBS)
+        if "vllm" in all_args:
             sh("pip install -q vllm")  # NOTE: vLLM also dropped Pascal; needs a T4, not P100.
         else:
-            # Install matching torch+torchvision from cu121 (torchvision must match torch's ABI,
-            # else `torchvision::nms does not exist` breaks transformers' model import).
-            sh("pip install -q torch==2.5.1 torchvision==0.20.1 "
-               "--index-url https://download.pytorch.org/whl/cu121")
+            install_p100_torch()
 
     if STAGE == "gpucheck":
         sh('nvidia-smi || true')
@@ -65,6 +76,9 @@ def main():
         sh("python -m scripts.smoke_test")
     elif STAGE == "rollouts":
         sh(f"python -m scripts.run_rollouts {ARGS}")
+    elif STAGE == "rollouts_many":
+        for j in JOBS:
+            sh(f"python -m scripts.run_rollouts {j}")
     elif STAGE == "eval":
         sh(f"python -m scripts.run_eval {ARGS}")
     else:
