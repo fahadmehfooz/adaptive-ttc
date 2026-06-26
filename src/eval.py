@@ -104,7 +104,9 @@ def trained_gate_sweep(rows, gate_model, k0=4, kmax=16, thresholds=None):
     """Adaptive policy driven by a trained gate: stop if P(correct | first-k0 features) >= t.
     Sweeps t -> cost-accuracy curve. `gate_model` is a fitted gate.TrainedGate."""
     if thresholds is None:
-        thresholds = [i / 10 for i in range(2, 10)]  # 0.2 .. 0.9
+        # include high thresholds so the policy can converge to full-budget accuracy
+        # (stop only on the most-confident/easy problems).
+        thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
     pts = []
     for t in thresholds:
         res = adaptive(
