@@ -45,6 +45,23 @@ def sh(cmd):
     subprocess.run(cmd, shell=True, check=True)
 
 
+def setup_hf_auth():
+    """Load HF_TOKEN from Kaggle Secrets (for gated models, e.g. Llama-3.1-8B) and export it so
+    transformers/vLLM/hf_hub authenticate the download. No-op if the secret isn't set.
+    NEVER prints the token value."""
+    try:
+        from kaggle_secrets import UserSecretsClient
+        tok = UserSecretsClient().get_secret("HF_TOKEN")
+        if tok:
+            os.environ["HF_TOKEN"] = tok
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = tok
+            print(f"[{_ts()}] [hf-auth] HF_TOKEN loaded from Kaggle Secrets (gated models enabled)", flush=True)
+        else:
+            print(f"[{_ts()}] [hf-auth] HF_TOKEN secret present but empty", flush=True)
+    except Exception as e:
+        print(f"[{_ts()}] [hf-auth] no HF_TOKEN secret ({type(e).__name__}) — only OPEN models will download", flush=True)
+
+
 def main():
     if not os.path.exists(REPO):
         sh(f"git clone --depth 1 {REPO_URL} {REPO}")
@@ -74,6 +91,8 @@ def main():
             # 4-bit (7B/8B on 16GB P100) needs bitsandbytes; must match the cu121 torch above.
             if "4bit" in all_args or "nf4" in all_args:
                 sh("pip install -q bitsandbytes")
+        # Authenticate to HF if a token secret is attached (needed for gated models like Llama-8B).
+        setup_hf_auth()
 
     if STAGE == "gpucheck":
         sh('nvidia-smi || true')
