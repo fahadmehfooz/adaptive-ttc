@@ -17,7 +17,7 @@ from datetime import datetime
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
 STAGE = "rollouts"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
-ARGS = "--dataset bbh --model qwen-1.5b --backend hf --n 16 --limit 200"
+ARGS = "--dataset math500 --model qwen-1.5b --backend hf --n 16 --limit 200"
 
 # For STAGE="rollouts_many": run several rollouts in ONE GPU session (one torch install,
 # models cached within the session) — far cheaper on quota than one kernel per config.
