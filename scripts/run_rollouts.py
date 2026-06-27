@@ -30,6 +30,17 @@ def main():
 
     config.ensure_dirs()
 
+    # Log the GPU we actually got — confirms accelerator (P100 vs T4×2) before any long run.
+    try:
+        import torch
+        if torch.cuda.is_available():
+            names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+            log(f"GPU: {torch.cuda.device_count()}× {names}")
+        else:
+            log("GPU: none (CPU)")
+    except Exception as e:
+        log(f"GPU: could not query ({e})")
+
     log(f"loading dataset {args.dataset} (split={args.split}, limit={args.limit}) ...")
     problems = data.load_problems(args.dataset, limit=args.limit, split=args.split)
     log(f"loaded {len(problems)} problems")

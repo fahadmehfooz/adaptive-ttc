@@ -91,12 +91,17 @@ class HFSampler:
 class VLLMSampler:
     """vLLM backend — GPU only, fast batched sampling. UNTESTED locally (see CLAUDE.md S5)."""
 
-    def __init__(self, model_key, quantization=None, **_):
+    def __init__(self, model_key, quantization=None, tensor_parallel=None, **_):
+        import torch
         from vllm import LLM
         from transformers import AutoTokenizer
         model_id = config.MODELS[model_key]
+        # Default to ALL visible GPUs (e.g. 2 on Kaggle's T4×2) so 7B/8B shard across them.
+        tp = int(tensor_parallel) if tensor_parallel else max(1, torch.cuda.device_count())
         self.tok = AutoTokenizer.from_pretrained(model_id, cache_dir=config.HF_CACHE)
-        self.llm = LLM(model=model_id, quantization=quantization, download_dir=config.HF_CACHE)
+        log(f"[vllm] loading {model_id} tensor_parallel_size={tp} quantization={quantization}")
+        self.llm = LLM(model=model_id, quantization=quantization, download_dir=config.HF_CACHE,
+                       tensor_parallel_size=tp)
         self.s = config.SAMPLING
 
     def sample(self, problems, n):

@@ -17,9 +17,11 @@ from datetime import datetime
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
 STAGE = "rollouts"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
-# 7B scale endpoint via 4-bit (fits P100 16GB; fp16 7B would OOM). VALIDATION FIRST (limit 8):
-# confirm the bitsandbytes+cu121-torch stack loads & generates before the full 500-problem run.
-ARGS = "--dataset gsm8k --model qwen-7b --backend hf --n 8 --limit 8 --quantization 4bit --gen-batch 4"
+# 7B scale endpoint via T4×2 + vLLM (user toggled accelerator). VALIDATION FIRST (limit 8): the
+# GPU-identity log line confirms we actually got 2× T4 (not P100), and tests the vLLM stack, before
+# the full 500-problem run. tensor_parallel auto = #GPUs. (4-bit P100 fallback: --backend hf
+# --quantization 4bit --gen-batch 4, kept working in HFSampler.)
+ARGS = "--dataset gsm8k --model qwen-7b --backend vllm --n 8 --limit 8"
 
 # For STAGE="rollouts_many": run several rollouts in ONE GPU session (one torch install,
 # models cached within the session) — far cheaper on quota than one kernel per config.
