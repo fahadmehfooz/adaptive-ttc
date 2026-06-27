@@ -16,8 +16,10 @@ from datetime import datetime
 
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
-STAGE = "rollouts_many"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
-ARGS = "--dataset math500 --model qwen-1.5b --backend hf --n 16 --limit 200"
+STAGE = "rollouts"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
+# 7B scale endpoint via 4-bit (fits P100 16GB; fp16 7B would OOM). VALIDATION FIRST (limit 8):
+# confirm the bitsandbytes+cu121-torch stack loads & generates before the full 500-problem run.
+ARGS = "--dataset gsm8k --model qwen-7b --backend hf --n 8 --limit 8 --quantization 4bit --gen-batch 4"
 
 # For STAGE="rollouts_many": run several rollouts in ONE GPU session (one torch install,
 # models cached within the session) — far cheaper on quota than one kernel per config.
@@ -67,6 +69,9 @@ def main():
             sh("pip install -q vllm")  # NOTE: vLLM also dropped Pascal; needs a T4, not P100.
         else:
             install_p100_torch()
+            # 4-bit (7B/8B on 16GB P100) needs bitsandbytes; must match the cu121 torch above.
+            if "4bit" in all_args or "nf4" in all_args:
+                sh("pip install -q bitsandbytes")
 
     if STAGE == "gpucheck":
         sh('nvidia-smi || true')

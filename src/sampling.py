@@ -39,16 +39,23 @@ class HFSampler:
     `gen_batch` caps how many sequences are generated per forward pass — keep it small for
     large models (7B/8B) on a 16 GB GPU to avoid OOM; n is split into gen_batch-sized chunks."""
 
-    def __init__(self, model_key, gen_batch=16, **_):
+    def __init__(self, model_key, gen_batch=16, quantization=None, **_):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         model_id = config.MODELS[model_key]
         self.tok = AutoTokenizer.from_pretrained(model_id, cache_dir=config.HF_CACHE)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_id, cache_dir=config.HF_CACHE,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            device_map="auto" if torch.cuda.is_available() else None,
-        )
+        kw = dict(cache_dir=config.HF_CACHE,
+                  device_map="auto" if torch.cuda.is_available() else None)
+        # 4-bit lets 7B/8B fit a 16GB P100 (fp16 weights alone are ~15GB → OOM). Needs bitsandbytes.
+        if quantization in ("4bit", "nf4"):
+            from transformers import BitsAndBytesConfig
+            log(f"[hf] loading {model_id} in 4-bit (nf4) — fits big models on 16GB")
+            kw["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True)
+        else:
+            kw["torch_dtype"] = torch.float16 if torch.cuda.is_available() else torch.float32
+        self.model = AutoModelForCausalLM.from_pretrained(model_id, **kw)
         self.s = config.SAMPLING
         self.gen_batch = int(gen_batch)
 
