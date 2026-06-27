@@ -2,6 +2,7 @@
 import hashlib
 from dataclasses import dataclass
 from . import config
+from .logutil import log
 
 # Representative BBH task subset for the transfer eval (S6). Spans answer formats:
 # multiple-choice letters, yes/no, words, counts. Override via load_problems(..., tasks=[...]).
@@ -71,14 +72,19 @@ def _load_bbh(limit, tasks=None):
     from datasets import load_dataset
     tasks = tasks or BBH_TASKS
     per = max(1, limit // len(tasks)) if limit else None
+    log(f"BBH: loading {len(tasks)} task-configs (~{per} each) — each is a separate HF download")
     probs = []
-    for task in tasks:
+    for ti, task in enumerate(tasks):
+        log(f"BBH: [{ti + 1}/{len(tasks)}] loading task '{task}' ...")
         ds = load_dataset("lukaemon/bbh", task, split="test", cache_dir=config.HF_CACHE)
+        before = len(probs)
         for i, ex in enumerate(ds):
             if per is not None and i >= per:
                 break
             probs.append(Problem(f"bbh-{task}-{i}", "bbh",
                                  ex["input"].strip(), str(ex["target"]).strip(), "mc"))
+        log(f"BBH: [{ti + 1}/{len(tasks)}] task '{task}' -> {len(probs) - before} problems "
+            f"(running total {len(probs)})")
     return probs
 
 

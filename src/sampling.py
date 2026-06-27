@@ -1,7 +1,9 @@
 """Samplers: FakeSampler (offline), HFSampler (transformers), VLLMSampler (GPU fast path).
 See CLAUDE.md section 4 and section 5 (VLLMSampler untested locally)."""
 import hashlib
+import time
 from . import config, data
+from .logutil import log
 
 
 def _seeded(*parts):
@@ -53,7 +55,8 @@ class HFSampler:
     def sample(self, problems, n):
         import torch
         out = []
-        for p in problems:
+        for pi, p in enumerate(problems):
+            t0 = time.time()
             msgs = [{"role": "user", "content": data.build_prompt(p)}]
             text = self.tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
             inputs = self.tok(text, return_tensors="pt").to(self.model.device)
@@ -72,6 +75,9 @@ class HFSampler:
                     gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
                 remaining -= b
             out.append(decoded)
+            # Per-problem heartbeat: this is the real slow inner loop on the GPU.
+            log(f"    [hf] problem {pi + 1}/{len(problems)} ({p.id}): "
+                f"{len(decoded)} samples in {time.time() - t0:.1f}s")
         return out
 
 

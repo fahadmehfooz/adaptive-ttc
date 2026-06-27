@@ -6,8 +6,10 @@ Run (GPU):
 import argparse
 import json
 import os
+import time
 
 from src import config, data, grader, sampling
+from src.logutil import log, fmt_eta
 
 
 def main():
@@ -23,10 +25,20 @@ def main():
                     help="hf: sequences per forward pass; lower (e.g. 4) for 7B/8B to avoid OOM")
     args = ap.parse_args()
 
+    log(f"run_rollouts START dataset={args.dataset} model={args.model} "
+        f"backend={args.backend} n={args.n} limit={args.limit} gen_batch={args.gen_batch}")
+
     config.ensure_dirs()
+
+    log(f"loading dataset {args.dataset} (split={args.split}, limit={args.limit}) ...")
     problems = data.load_problems(args.dataset, limit=args.limit, split=args.split)
+    log(f"loaded {len(problems)} problems")
+
+    log(f"initializing sampler backend={args.backend} model={args.model} "
+        f"(this loads weights — slow for big models) ...")
     sampler = sampling.get_sampler(args.backend, args.model,
                                    quantization=args.quantization, gen_batch=args.gen_batch)
+    log("sampler ready")
 
     out_path = os.path.join(config.ROLLOUTS_DIR, f"{args.dataset}_{args.model}.jsonl")
 
@@ -38,12 +50,16 @@ def main():
                 if line.strip():
                     done.add(json.loads(line)["id"])
     todo = [p for p in problems if p.id not in done]
-    print(f"{len(done)} already done, {len(todo)} to generate -> {out_path}")
+    log(f"{len(done)} already done, {len(todo)} to generate -> {out_path}")
 
     BATCH = 32
+    t_start = time.time()
     with open(out_path, "a") as f:
         for i in range(0, len(todo), BATCH):
             chunk = todo[i:i + BATCH]
+            log(f"chunk {i // BATCH + 1}/{(len(todo) + BATCH - 1) // BATCH}: "
+                f"generating problems {i}..{min(i + BATCH, len(todo))} of {len(todo)} "
+                f"(n={args.n} samples each)")
             raw = sampler.sample(chunk, n=args.n)
             for p, texts in zip(chunk, raw):
                 graded = grader.grade_samples(p, texts)
@@ -52,7 +68,10 @@ def main():
                     "kind": p.kind, "samples": graded,
                 }) + "\n")
             f.flush()
-            print(f"  {min(i + BATCH, len(todo))}/{len(todo)}")
+            done_n = min(i + BATCH, len(todo))
+            log(f"saved {done_n}/{len(todo)} -> {out_path} | {fmt_eta(done_n, len(todo), time.time() - t_start)}")
+    log(f"run_rollouts DONE dataset={args.dataset} model={args.model} "
+        f"({len(todo)} new, {len(done)} pre-existing) in {(time.time() - t_start) / 60:.1f}m")
 
 
 if __name__ == "__main__":
