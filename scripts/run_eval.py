@@ -9,6 +9,7 @@ import json
 import os
 
 from src import config, eval as ev, plots
+from src.logutil import log
 
 
 def main():
@@ -20,13 +21,16 @@ def main():
     args = ap.parse_args()
 
     config.ensure_dirs()
+    log(f"run_eval START rollouts={os.path.basename(args.rollouts)} k0={args.k0} kmax={args.kmax} gate={args.gate}")
     rows = ev.load_rollouts(args.rollouts)
+    log(f"loaded {len(rows)} rows; computing baselines + adaptive sweeps ...")
     points = ev.baselines_and_adaptive(rows, k0=args.k0, kmax=args.kmax)
 
     if args.gate:
         from src import gate as gatemod
         gm = gatemod.TrainedGate.load(args.gate)
         points += ev.trained_gate_sweep(rows, gm, k0=args.k0, kmax=args.kmax)
+        log(f"added trained-gate sweep from {os.path.basename(args.gate)}")
 
     tag = os.path.splitext(os.path.basename(args.rollouts))[0]
     results_path = os.path.join(config.RESULTS_DIR, f"{tag}.json")

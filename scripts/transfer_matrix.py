@@ -15,6 +15,7 @@ import json
 import os
 
 from src import config, eval as ev, gate as gatemod, calibration
+from src.logutil import log
 from scripts.train_gate import build_training
 
 
@@ -46,24 +47,32 @@ def main():
 
     config.ensure_dirs()
 
+    log(f"transfer_matrix START train={os.path.basename(args.train)} "
+        f"targets={[os.path.basename(t) for t in args.targets]} k0={args.k0} kmax={args.kmax}")
+
     # Train gate on source.
+    log(f"loading + training gate on source {os.path.basename(args.train)} ...")
     train_rows = ev.load_rollouts(args.train)
     feats, labels = build_training(train_rows, args.k0)
     gate_model = None
     if len(set(labels)) >= 2:
         gate_model = gatemod.TrainedGate().fit(feats, labels)
         confs = [gate_model.predict_proba(f) for f in feats]
-        print(f"gate trained on {os.path.basename(args.train)} | train ECE {calibration.ece(confs, labels):.4f}")
+        log(f"gate trained on {os.path.basename(args.train)} "
+            f"({len(train_rows)} rows) | train ECE {calibration.ece(confs, labels):.4f}")
     else:
-        print("WARNING: source has one class — skipping trained-gate row.")
+        log("WARNING: source has one class — skipping trained-gate row.")
 
     # Evaluate every method on every target; collect iso-accuracy compute savings.
     matrix = {}
-    for tgt in args.targets:
+    for ti, tgt in enumerate(args.targets, 1):
+        log(f"[target {ti}/{len(args.targets)}] evaluating {os.path.basename(tgt)} ...")
         rows = ev.load_rollouts(tgt)
         kmax = args.kmax
         full_acc = full_budget_acc(rows, kmax)
         pts = summarize(rows, gate_model, args.k0, kmax)
+        log(f"[target {ti}/{len(args.targets)}] {os.path.basename(tgt)}: "
+            f"{len(rows)} rows, full_acc={full_acc:.3f}, {len(pts)} policy points")
         per_method = {}
         for method in sorted({p["policy"] for p in pts}):
             mpts = [p for p in pts if p["policy"] == method]

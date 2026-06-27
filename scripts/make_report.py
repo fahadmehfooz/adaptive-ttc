@@ -11,6 +11,7 @@ import json
 import os
 
 from src import config, eval as ev
+from src.logutil import log
 
 METHODS = ["esc", "adaptive-confidence", "adaptive-agreement", "adaptive-trained"]
 MODEL_ORDER = {"qwen-0.5b": 0, "qwen-1.5b": 1, "qwen-7b": 2, "llama-8b": 3}
@@ -38,10 +39,12 @@ def parse_name(fn):
 def main():
     config.ensure_dirs()
     files = sorted(glob.glob(os.path.join(config.ROLLOUTS_DIR, "*.jsonl")))
+    log(f"make_report START: {len(files)} rollout file(s) under {config.ROLLOUTS_DIR}")
     rows_by = {}
     table = []
-    for f in files:
+    for fi, f in enumerate(files, 1):
         ds, model = parse_name(f)
+        log(f"[{fi}/{len(files)}] {os.path.basename(f)}: loading + computing savings ...")
         rows = ev.load_rollouts(f)
         kmax = len(rows[0]["samples"])
         full = ev.fixed_budget(rows, kmax)["accuracy"]
@@ -55,6 +58,8 @@ def main():
             gate_model = gatemod.TrainedGate.load(gp)
         for m in METHODS:
             rec[m] = saving(rows, m, kmax, gate_model=gate_model)
+        log(f"[{fi}/{len(files)}] {ds}/{model}: n={len(rows)} kmax={kmax} "
+            f"full_acc={rec['full_acc']} gate={'yes' if gate_model else 'no'}")
         table.append(rec)
         rows_by[(ds, model)] = rows
 
@@ -77,7 +82,7 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
         f.write("\n".join(lines) + "\n")
-    print(f"report -> {out}\n")
+    log(f"make_report DONE report -> {out} ({len(table)} rows)")
     print("\n".join(lines))
 
 

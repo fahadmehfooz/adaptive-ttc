@@ -17,6 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from src import config, eval as ev
+from src.logutil import log
 
 # model key (as it appears in the rollouts filename) -> billions of params
 MODEL_SIZE = {"qwen-0.5b": 0.5, "qwen-1.5b": 1.5, "qwen-7b": 7.0, "llama-8b": 8.0}
@@ -50,14 +51,16 @@ def main():
     ap.add_argument("--kmax", type=int, default=config.SAMPLING["n"])
     args = ap.parse_args()
     config.ensure_dirs()
+    log(f"scale_plot START: {len(args.rollouts)} rollout file(s) k0={args.k0} kmax={args.kmax}")
 
     series = {m: [] for m in METHODS}  # method -> [(size, saving)]
     table = {}
-    for path in args.rollouts:
+    for pi, path in enumerate(args.rollouts, 1):
         key, size = size_from_path(path)
         if size is None:
-            print(f"skip (unknown model size): {path}")
+            log(f"[{pi}/{len(args.rollouts)}] skip (unknown model size): {path}")
             continue
+        log(f"[{pi}/{len(args.rollouts)}] {os.path.basename(path)} ({key}, {size}B): computing savings ...")
         rows = ev.load_rollouts(path)
         table[key] = {"size_b": size, "full_acc": round(ev.fixed_budget(rows, args.kmax)["accuracy"], 3)}
         for m in METHODS:
@@ -86,8 +89,8 @@ def main():
     out_png = os.path.join(config.FIGURES_DIR, "scale_saving.png")
     fig.savefig(out_png, dpi=150)
 
-    print(f"scale summary -> {out_json}")
-    print(f"figure        -> {out_png}")
+    log(f"scale_plot DONE scale summary -> {out_json}")
+    log(f"scale_plot DONE figure        -> {out_png}")
     for key, d in sorted(table.items(), key=lambda kv: kv[1]["size_b"]):
         print(f"  {key:12} ({d['size_b']}B) full_acc={d['full_acc']}  "
               + "  ".join(f"{m}={d[m]}" for m in METHODS))

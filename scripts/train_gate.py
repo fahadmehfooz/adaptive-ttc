@@ -11,6 +11,7 @@ import argparse
 import os
 
 from src import config, eval as ev, gate as gatemod, calibration
+from src.logutil import log
 
 
 def build_training(rows, k0):
@@ -31,27 +32,30 @@ def main():
     args = ap.parse_args()
 
     config.ensure_dirs()
+    log(f"train_gate START rollouts={os.path.basename(args.rollouts)} k0={args.k0} name={args.name}")
     rows = ev.load_rollouts(args.rollouts)
+    log(f"loaded {len(rows)} rows; building features (first-{args.k0}) + labels (majority-of-K correct) ...")
     feats, labels = build_training(rows, args.k0)
 
     pos = sum(labels)
-    print(f"{len(labels)} examples | positives (majority-correct): {pos} | negatives: {len(labels) - pos}")
+    log(f"{len(labels)} examples | positives (majority-correct): {pos} | negatives: {len(labels) - pos}")
     if len(set(labels)) < 2:
-        print("WARNING: only one class present — cannot train a gate. Need rollouts with a mix "
-              "of correct/incorrect majorities (real data will have this; toy_fake may not).")
+        log("WARNING: only one class present — cannot train a gate. Need rollouts with a mix "
+            "of correct/incorrect majorities (real data will have this; toy_fake may not).")
         return
 
+    log("fitting TrainedGate ...")
     gate = gatemod.TrainedGate().fit(feats, labels)
 
     # Calibration report on the training set (real eval uses held-out transfer in S6).
     confs = [gate.predict_proba(f) for f in feats]
     ece = calibration.ece(confs, labels)
-    print(f"train ECE: {ece:.4f}  | mean predicted P(correct): {sum(confs)/len(confs):.3f}")
+    log(f"train ECE: {ece:.4f}  | mean predicted P(correct): {sum(confs)/len(confs):.3f}")
 
     name = args.name or os.path.splitext(os.path.basename(args.rollouts))[0]
     out = os.path.join(config.GATE_DIR, f"{name}.joblib")
     gate.save(out)
-    print(f"saved gate -> {out}")
+    log(f"train_gate DONE saved gate -> {out}")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import argparse
 import json
 
 from src import data, grader
+from src.logutil import log
 
 
 def main():
@@ -17,9 +18,13 @@ def main():
     ap.add_argument("--rollouts", required=True)
     args = ap.parse_args()
 
+    log(f"regrade START {args.rollouts}")
     rows = [json.loads(l) for l in open(args.rollouts) if l.strip()]
+    log(f"loaded {len(rows)} rows; re-grading from stored text with current grader ...")
     changed = 0
-    for r in rows:
+    for ri, r in enumerate(rows):
+        if ri and ri % 100 == 0:
+            log(f"  regraded {ri}/{len(rows)} rows ...")
         # Reconstruct a minimal Problem just to carry gold + kind.
         p = data.Problem(r["id"], r["dataset"], "", r["gold"], r["kind"])
         regraded = grader.grade_samples(p, [s["text"] for s in r["samples"]])
@@ -31,7 +36,7 @@ def main():
     with open(args.rollouts, "w") as f:
         f.write("\n".join(json.dumps(r) for r in rows))
     n = sum(len(r["samples"]) for r in rows)
-    print(f"regraded {args.rollouts}: {changed}/{n} samples changed")
+    log(f"regrade DONE {args.rollouts}: {changed}/{n} samples changed across {len(rows)} rows")
 
 
 if __name__ == "__main__":
