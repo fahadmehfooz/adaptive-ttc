@@ -17,11 +17,11 @@ from datetime import datetime
 # ---- EDIT THESE PER RUN -----------------------------------------------------
 REPO_URL = "https://github.com/fahadmehfooz/adaptive-ttc.git"
 STAGE = "rollouts"  # "gpucheck" | "smoke" | "rollouts" | "rollouts_many" | "eval"
-# 7B scale endpoint via T4×2 + vLLM (user toggled accelerator). VALIDATION FIRST (limit 8): the
-# GPU-identity log line confirms we actually got 2× T4 (not P100), and tests the vLLM stack, before
-# the full 500-problem run. tensor_parallel auto = #GPUs. (4-bit P100 fallback: --backend hf
-# --quantization 4bit --gen-batch 4, kept working in HFSampler.)
-ARGS = "--dataset gsm8k --model qwen-7b --backend vllm --n 8 --limit 8"
+# 7B scale endpoint. LESSON (v14): the UI accelerator toggle does NOT carry into `kaggle kernels
+# push` — headless runs always get 1× P100, and vLLM can't run on Pascal (no kernel image). So the
+# T4×2+vLLM path is UI-only and unusable for our automated flow. Use the VALIDATED 4-bit P100 path
+# (v13 worked). limit 200 to stay under the runtime cap; matches transfer-rollout n.
+ARGS = "--dataset gsm8k --model qwen-7b --backend hf --n 16 --limit 200 --quantization 4bit --gen-batch 4"
 
 # For STAGE="rollouts_many": run several rollouts in ONE GPU session (one torch install,
 # models cached within the session) — far cheaper on quota than one kernel per config.
