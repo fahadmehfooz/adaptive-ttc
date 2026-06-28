@@ -93,6 +93,11 @@ def main():
                 sh("pip install -q bitsandbytes")
         # Authenticate to HF if a token secret is attached (needed for gated models like Llama-8B).
         setup_hf_auth()
+        # Keep multi-GB model weights OUT of the persisted /kaggle/working/repo so `kaggle kernels
+        # output` pulls stay small (rollouts+log only). /kaggle/temp is ephemeral, not saved.
+        os.environ["ADAPTIVE_TTC_HF_CACHE"] = "/kaggle/temp/hf_cache"
+        os.makedirs("/kaggle/temp/hf_cache", exist_ok=True)
+        print(f"[{_ts()}] HF cache -> /kaggle/temp/hf_cache (ephemeral; not saved to output)", flush=True)
 
     if STAGE == "gpucheck":
         sh('nvidia-smi || true')

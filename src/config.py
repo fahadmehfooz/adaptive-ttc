@@ -4,7 +4,10 @@ import os
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DATA_DIR = os.path.join(REPO_ROOT, "data")
-HF_CACHE = os.path.join(DATA_DIR, "hf_cache")
+# HF cache: overridable via env so the Kaggle runner can point it at an EPHEMERAL dir
+# (e.g. /kaggle/temp) — otherwise multi-GB model weights land under the persisted repo and get
+# re-downloaded by every `kaggle kernels output` pull (filled local disk once; see CLAUDE.md).
+HF_CACHE = os.environ.get("ADAPTIVE_TTC_HF_CACHE", os.path.join(DATA_DIR, "hf_cache"))
 
 OUTPUT_DIR = os.path.join(REPO_ROOT, "outputs")
 ROLLOUTS_DIR = os.path.join(OUTPUT_DIR, "rollouts")
