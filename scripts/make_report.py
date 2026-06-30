@@ -38,7 +38,8 @@ def parse_name(fn):
 
 def main():
     config.ensure_dirs()
-    files = sorted(glob.glob(os.path.join(config.ROLLOUTS_DIR, "*.jsonl")))
+    files = sorted(f for f in glob.glob(os.path.join(config.ROLLOUTS_DIR, "*.jsonl"))
+                   if not os.path.basename(f).startswith("toy"))
     log(f"make_report START: {len(files)} rollout file(s) under {config.ROLLOUTS_DIR}")
     rows_by = {}
     table = []
@@ -77,6 +78,24 @@ def main():
     lines.append("Notes: GSM8K + BBH grading is reliable; MATH-500 grading is approximate "
                  "(string/boxed match) — treat MATH accuracy as a lower bound, but cross-method "
                  "comparison at fixed grading is still valid.")
+
+    # calibration table (S7) — appended if scripts.calibration_analysis has been run
+    calib_path = os.path.join(config.RESULTS_DIR, "calibration.json")
+    if os.path.exists(calib_path):
+        with open(calib_path) as cf:
+            calib = json.load(cf)
+        calib = [r for r in calib if r["k"] == max(c["k"] for c in calib)]
+        calib.sort(key=lambda r: (r["dataset"], MODEL_ORDER.get(r["model"], 9)))
+        kmax_c = calib[0]["k"] if calib else "?"
+        lines += ["", f"## Calibration of the agreement signal (ECE, K={kmax_c})", "",
+                  "Raw + temperature-scaled ECE of agreement vs majority-correctness "
+                  "(`scripts.calibration_analysis`).", "",
+                  "| dataset | model | mean_conf | acc | ECE | ECE(T) | T |",
+                  "|---|---|--:|--:|--:|--:|--:|"]
+        for r in calib:
+            lines.append(f"| {r['dataset']} | {r['model']} | {r['mean_confidence']:.3f} | "
+                         f"{r['accuracy']:.3f} | {r['ece_raw']:.3f} | {r['ece_scaled']:.3f} | "
+                         f"{r['temperature']:.2f} |")
 
     out = os.path.join(config.REPO_ROOT, "notes", "RESULTS.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
