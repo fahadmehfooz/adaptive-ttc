@@ -21,3 +21,6 @@ notes/
 # Kaggle credentials — NEVER commit
 kaggle.json
 .kaggle/
+
+# Claude Code tooling (never publish)
+.claude/
