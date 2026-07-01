@@ -96,13 +96,13 @@ def _boot_saving(cost, correct, full_correct, kmax, B, seed, tol=TOL):
         v = saving(rng.integers(0, n, size=n))
         if v is not None:
             vals.append(v)
-    if not vals:
-        return (point, None, None, 0)
+    if not vals or point is None:
+        # no point estimate (operating point unreachable) -> do not report a CI for a non-existent value
+        return (None, None, None, len(vals))
     vals = np.sort(np.array(vals))
     lo = float(vals[int(0.025 * len(vals))])
     hi = float(vals[min(len(vals) - 1, int(0.975 * len(vals)))])
-    return (None if point is None else round(float(point), 4),
-            round(lo, 4), round(hi, 4), len(vals))
+    return (round(float(point), 4), round(lo, 4), round(hi, 4), len(vals))
 
 
 def analyze_cell(rows, model, kmax, k0, min_k, B, seed, gate_dir):
