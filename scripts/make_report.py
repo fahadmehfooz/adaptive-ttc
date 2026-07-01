@@ -86,11 +86,12 @@ def main():
     if "scale_matched" in A:
         sm = A["scale_matched"]
         L += ["", f"## Scale on the 7B-matched GSM8K subset (n={sm['n_ids']} shared ids)", "",
-              "Removes the sample-size/subset confound. `CI(chain-order)` also permutes each problem's "
-              "chain arrival order → covers decoding-order variance (§3). The 7B confidence CI stays "
-              "disjoint from the smaller models under it. Remaining confound: 7B is 4-bit vs fp16 "
-              "(needs a GPU fp16 run).", "",
-              "| model | full_acc | conf(inc) | CI(problem) | CI(chain-order) | oracle | random |",
+              "Removes the sample-size/subset confound. `CI(order-perm)` also permutes each problem's "
+              "chain arrival order — an arrival-ORDER sensitivity check (not seed variance; §3). The 7B "
+              "confidence CI stays disjoint from smaller models under it, so the large 7B saving is not "
+              "a sampling/ordering artifact — but attribution to *scale* is unidentified: 7B is 4-bit "
+              "vs fp16 (systematic confound; needs a GPU fp16 run).", "",
+              "| model | full_acc | conf(inc) | CI(problem) | CI(order-perm) | oracle | random |",
               "|---|--:|--:|---|---|--:|--:|"]
         for model in sorted(sm["cells"], key=lambda m: MODEL_ORDER.get(m, 9)):
             c = sm["cells"][model]

@@ -106,12 +106,15 @@ def _boot_saving(cost, correct, full_correct, kmax, B, seed, tol=TOL):
 
 
 def _conf_chainperm_ci(rows, kmax, min_k, ts_conf, B, seed):
-    """CI for the incremental-confidence saving under a NESTED bootstrap that resamples problems AND
-    permutes each problem's chain ARRIVAL ORDER. The 16 chains per problem are exchangeable (iid at
-    fixed temperature), so re-ordering them simulates a different decoding run's arrival order — the
-    dominant decoding-variance component for an adaptive stopping rule (which chains come first). This
-    is the CI that answers 'your bootstrap holds the 16 chains fixed': here order is not held fixed.
-    (It still cannot cover chain-*identity* variance — that needs fresh rollouts — stated as such.)"""
+    """Arrival-ORDER sensitivity check: CI for the incremental-confidence saving under a nested
+    bootstrap that resamples problems AND permutes each problem's chain arrival order. The 16 chains
+    per problem are exchangeable (iid at fixed temperature), so re-ordering them tests whether the
+    result depends on *which fixed chains arrive first*. SCOPE (important, do not overstate): this
+    covers only the arrival-ORDER component of decoding variance. It does NOT cover chain-IDENTITY
+    variance (a fresh decoding seed yields 16 *different* chains, changing the agreement statistic the
+    rule keys on) — that needs fresh multi-seed rollouts — and it says nothing about the 4-bit-vs-fp16
+    precision confound, which is systematic, not stochastic. Use it to rule out an ordering artifact,
+    not to claim seed-robustness or to identify a scale effect."""
     from collections import Counter
     n = len(rows)
     answers = [[x["answer"] for x in r["samples"][:kmax]] for r in rows]
