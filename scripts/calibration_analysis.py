@@ -46,6 +46,30 @@ def _parse_name(path):
     return dataset, model
 
 
+def _ece_isotonic(confs, labels, seed=0):
+    """ECE after a monotone (isotonic) recalibration share->P(correct), 2-fold cross-fit (out-of-fold
+    predictions, no in-sample optimism). If task-shaped ECE largely vanishes here, the raw ECE was a
+    scale/identity effect (agreement share is simply not a probability), not a resolution failure."""
+    import random
+    from sklearn.isotonic import IsotonicRegression
+    idx = list(range(len(confs)))
+    random.Random(seed).shuffle(idx)
+    half = len(idx) // 2
+    folds = [idx[:half], idx[half:]]
+    recal = [0.0] * len(confs)
+    for f in range(2):
+        test, train = folds[f], folds[1 - f]
+        if len({labels[i] for i in train}) < 2:
+            for i in test:
+                recal[i] = confs[i]
+            continue
+        ir = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
+        ir.fit([confs[i] for i in train], [labels[i] for i in train])
+        for i, pv in zip(test, ir.predict([confs[i] for i in test])):
+            recal[i] = float(pv)
+    return ece(recal, labels)
+
+
 def _ece_ci(confs, labels, n_bins=10, B=2000, seed=0, alpha=0.05):
     """Percentile-bootstrap CI for ECE over problems (fix #5)."""
     import random
@@ -75,6 +99,11 @@ def analyze_file(path, budgets, B=2000, seed=0):
         ci_lo, ci_hi = _ece_ci(confs, labels, n_bins=10, B=B, seed=seed)
         # bin-count robustness (fix #5): ECE is not an artifact of one bin choice
         ece_bins = {b: round(ece(confs, labels, b), 3) for b in (5, 10, 15)}
+        # iter2 #4: is ECE just the aggregate bias |mean_conf - acc| (an identity), and does the
+        # task-shape survive a monotone recalibration?
+        mc, ac = sum(confs) / n, sum(labels) / n
+        bias_gap = abs(mc - ac)
+        ece_isotonic = _ece_isotonic(confs, labels, seed=seed)
         # temperature scaling on the confidence logits
         logits = [_logit(c) for c in confs]
         T = temperature_scale(logits, labels)
@@ -87,13 +116,16 @@ def analyze_file(path, budgets, B=2000, seed=0):
             "ece_raw": ece_raw,
             "ece_raw_ci95": [ci_lo, ci_hi],
             "ece_by_bins": ece_bins,
+            "mean_conf_acc_gap": round(bias_gap, 3),
+            "ece_over_gap": (round(ece_raw / bias_gap, 2) if bias_gap > 1e-9 else None),
+            "ece_isotonic": round(ece_isotonic, 3),
             "temperature": T,
             "ece_scaled": ece_scaled,
         })
         diagrams[k] = (confs, labels)
         log(f"{dataset:8s} {model:10s} k={k:2d}  ECE {ece_raw:.3f} [{ci_lo:.3f},{ci_hi:.3f}] "
-            f"bins(5/10/15)={ece_bins[5]}/{ece_bins[10]}/{ece_bins[15]} -> T-scaled {ece_scaled:.3f} "
-            f"(T={T:.2f})  acc {sum(labels)/n:.3f}")
+            f"|Δconf-acc|={bias_gap:.3f} (ratio {ece_raw/bias_gap:.2f}) isotonic {ece_isotonic:.3f} "
+            f"-> T-scaled {ece_scaled:.3f}  acc {sum(labels)/n:.3f}")
     return out, diagrams
 
 

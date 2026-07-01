@@ -49,16 +49,38 @@ def main():
 
     # --- head-to-head (matched 2-stage) + incremental + yardsticks ---
     L += ["## Compute saving (matched mechanics + 95% CI + yardsticks)", "",
+          "Oracle shown as consistency/achievability: **consistency** = correct iso-accuracy ceiling "
+          "for our metric (stop when plurality==full-budget answer); **achievability** = stop at "
+          "earliest *correct* plurality (targets higher accuracy, not the same iso-accuracy point — "
+          "so on weak models it can be *lower* saving but higher accuracy). `n.r.` = the operating "
+          "point does not exist (no threshold reaches iso-accuracy).", "",
           "| dataset | model | n | full_acc | agree@k0 | trained@k0 | conf(inc) | esc(inc) | "
-          "oracle | random |", "|---|---|--:|--:|---|---|---|---|---|--:|"]
+          "oracle cons/ach | random |", "|---|---|--:|--:|---|---|---|---|---|--:|"]
     for name in sorted(A["cells"], key=_cell_key):
         c = A["cells"][name]
         ds, _, model = name.partition("_")
         h, inc = c["head_to_head_2stage"], c["incremental"]
         r = c["random_stop"]["saving_at_iso_acc"]
+        orc = f"{c['oracle_consistency']['saving']:.2f}/{c['oracle_achievable']['saving']:.2f}"
         L.append(f"| {ds} | {model} | {c['n']} | {c['full_acc']} | {_fmt(h.get('agreement'))} | "
                  f"{_fmt(h.get('trained'))} | {_fmt(inc.get('confidence'))} | {_fmt(inc.get('esc'))} | "
-                 f"{_fmt(c['oracle'])} | {'n.r.' if r is None else f'{r:.3f}'} |")
+                 f"{orc} | {'n.r.' if r is None else f'{r:.3f}'} |")
+
+    # --- paired difference (trained - agreement) + TOST + MDE ---
+    L += ["", "## Signal comparison: paired Δ (trained − agreement) on the same problems", "",
+          "Paired bootstrap (shared resample indices), TOST equivalence @ margin ±0.05, and the "
+          "achieved minimum-detectable-effect (MDE = ½·95%-CI width). `censored` = a signal is pinned "
+          "at the 2-stage ceiling (comparison uninformative).", "",
+          "| dataset | model | Δ | 95% CI | TOST | MDE | censored |",
+          "|---|---|--:|---|---|--:|:--:|"]
+    for name in sorted(A["cells"], key=_cell_key):
+        pd = A["cells"][name].get("paired_trained_minus_agreement")
+        if not pd or pd.get("delta") is None:
+            continue
+        ds, _, model = name.partition("_")
+        lo, hi = pd["ci95"]
+        L.append(f"| {ds} | {model} | {pd['delta']:+.3f} | [{lo:+.3f},{hi:+.3f}] | {pd['tost']} | "
+                 f"{pd['mde']:.3f} | {'yes' if pd.get('censored') else 'no'} |")
 
     # --- subset-matched scale (fix #3) ---
     if "scale_matched" in A:
@@ -84,16 +106,21 @@ def main():
         calib = [r for r in calib if r["k"] == kmax_c]
         calib.sort(key=lambda r: (r["dataset"], MODEL_ORDER.get(r["model"], 9)))
         L += ["", f"## Calibration of the agreement signal (ECE, K={kmax_c})", "",
-              "Raw ECE with 95% CI + bin-count robustness (5/10/15) + temperature-scaled ECE "
-              "(`scripts.calibration_analysis`).", "",
-              "| dataset | model | mean_conf | acc | ECE [95% CI] | ECE 5/10/15 | ECE(T) | T |",
-              "|---|---|--:|--:|---|---|--:|--:|"]
+              "Raw ECE [95% CI], bin robustness (5/10/15), the identity check "
+              "ratio=ECE/|mean_conf−acc| (≈1 ⇒ ECE is just aggregate bias, ~no resolution content), "
+              "and ECE after a monotone isotonic recalibration (2-fold cross-fit). "
+              "isotonic≈0 ⇒ a single monotone map removes the 'miscalibration' ⇒ the raw ECE reflects "
+              "that plurality share is not a probability, not a resolution failure.", "",
+              "| dataset | model | mean_conf | acc | ECE [95% CI] | bins 5/10/15 | ratio | "
+              "ECE isotonic | ECE(T) | T |",
+              "|---|---|--:|--:|---|---|--:|--:|--:|--:|"]
         for r in calib:
             lo, hi = r["ece_raw_ci95"]
             eb = r["ece_by_bins"]
             L.append(f"| {r['dataset']} | {r['model']} | {r['mean_confidence']:.3f} | "
                      f"{r['accuracy']:.3f} | {r['ece_raw']:.3f} [{lo:.3f},{hi:.3f}] | "
-                     f"{eb['5']}/{eb['10']}/{eb['15']} | {r['ece_scaled']:.3f} | "
+                     f"{eb['5']}/{eb['10']}/{eb['15']} | {r.get('ece_over_gap','—')} | "
+                     f"{r.get('ece_isotonic','—')} | {r['ece_scaled']:.3f} | "
                      f"{r['temperature']:.2f} |")
 
     L += ["", "Notes: GSM8K + BBH grading reliable; MATH-500 grading approximate (lower bound), but "

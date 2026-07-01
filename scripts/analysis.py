@@ -25,7 +25,7 @@ import os
 
 import numpy as np
 
-from src import config, eval as ev, gate as gatemod
+from src import config, eval as ev, gate as gatemod, stats
 from src.logutil import log
 
 MODEL_ORDER = {"qwen-0.5b": 0, "qwen-1.5b": 1, "qwen-7b": 2, "llama-8b": 3}
@@ -70,12 +70,9 @@ def _incremental_arrays(rows, should_stop_factory, ts, min_k, kmax):
     return cost, correct
 
 
-def _boot_saving(cost, correct, full_correct, kmax, B, seed, tol=TOL):
-    """Percentile-bootstrap the iso-accuracy saving of a (cost,correct)[T,n] method.
-    Returns (point, lo, hi, boot_valid)."""
-    rng = np.random.default_rng(seed)
-    n = full_correct.shape[0]
-
+def _saving_fn(cost, correct, full_correct, kmax, tol=TOL):
+    """Return idx-array -> iso-accuracy saving for a (cost,correct)[T,n] method (None if the bar is
+    unreachable). Used for both marginal CIs and the paired-difference bootstrap (shared indices)."""
     def saving(idx):
         full = full_correct[idx].mean()
         accs = correct[:, idx].mean(axis=1)
@@ -84,7 +81,15 @@ def _boot_saving(cost, correct, full_correct, kmax, B, seed, tol=TOL):
         if not ok.any():
             return None
         return 1.0 - costs[ok].min() / kmax
+    return saving
 
+
+def _boot_saving(cost, correct, full_correct, kmax, B, seed, tol=TOL):
+    """Percentile-bootstrap the iso-accuracy saving of a (cost,correct)[T,n] method.
+    Returns (point, lo, hi, boot_valid)."""
+    rng = np.random.default_rng(seed)
+    n = full_correct.shape[0]
+    saving = _saving_fn(cost, correct, full_correct, kmax, tol)
     point = saving(np.arange(n))
     vals = []
     for _ in range(B):
@@ -117,16 +122,30 @@ def analyze_cell(rows, model, kmax, k0, min_k, B, seed, gate_dir):
     # --- head-to-head @ k0 (matched mechanism) ---
     agr_sig = np.array([ev.gate.features(r["samples"][:k0])["agreement"] for r in rows])
     ts_agr = np.array([i / 10 for i in range(2, 11)])
-    cost, corr = _twostage_arrays(rows, agr_sig, head_correct, full_correct, ts_agr, k0, kmax)
-    p, lo, hi, nv = _boot_saving(cost, corr, full_correct, kmax, B, seed)
-    cell["head_to_head_2stage"]["agreement"] = {"saving": p, "ci95": [lo, hi], "boot_valid": nv}
+    agr_cost, agr_corr = _twostage_arrays(rows, agr_sig, head_correct, full_correct, ts_agr, k0, kmax)
+    p, lo, hi, nv = _boot_saving(agr_cost, agr_corr, full_correct, kmax, B, seed)
+    ceiling = 1 - k0 / kmax
+    cell["head_to_head_2stage"]["agreement"] = {
+        "saving": p, "ci95": [lo, hi], "boot_valid": nv,
+        "ceiling_censored": p is not None and abs(hi - ceiling) < 1e-9}
 
     if gate_model is not None:
         gp_sig = np.array([gate_model.predict_proba(ev.gate.features(r["samples"][:k0])) for r in rows])
         ts_tr = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99])
-        cost, corr = _twostage_arrays(rows, gp_sig, head_correct, full_correct, ts_tr, k0, kmax)
-        p, lo, hi, nv = _boot_saving(cost, corr, full_correct, kmax, B, seed)
-        cell["head_to_head_2stage"]["trained"] = {"saving": p, "ci95": [lo, hi], "boot_valid": nv}
+        tr_cost, tr_corr = _twostage_arrays(rows, gp_sig, head_correct, full_correct, ts_tr, k0, kmax)
+        p, lo, hi, nv = _boot_saving(tr_cost, tr_corr, full_correct, kmax, B, seed)
+        cell["head_to_head_2stage"]["trained"] = {
+            "saving": p, "ci95": [lo, hi], "boot_valid": nv,
+            "ceiling_censored": p is not None and abs(hi - ceiling) < 1e-9}
+        # PAIRED difference test (same problems) + TOST equivalence (fix iter2 #1)
+        n = len(rows)
+        pd = stats.paired_delta(
+            _saving_fn(agr_cost, agr_corr, full_correct, kmax),
+            _saving_fn(tr_cost, tr_corr, full_correct, kmax),
+            n, B=B, seed=seed, margin=0.05)
+        pd["censored"] = (cell["head_to_head_2stage"]["agreement"]["ceiling_censored"]
+                          or cell["head_to_head_2stage"]["trained"]["ceiling_censored"])
+        cell["paired_trained_minus_agreement"] = pd
 
     # --- incremental group ---
     ts_conf = np.array([i / 10 for i in range(5, 11)])
@@ -159,19 +178,28 @@ def analyze_cell(rows, model, kmax, k0, min_k, B, seed, gate_dir):
                 break
         orc_k[0, i] = k
     orc_corr = full_correct[None, :]
-    p, lo, hi, _ = _boot_saving(orc_k, orc_corr, full_correct, kmax, B, seed)
-    cell["oracle"] = {"saving": p, "ci95": [lo, hi]}
+    p_cons, lo, hi, _ = _boot_saving(orc_k, orc_corr, full_correct, kmax, B, seed)
+    cell["oracle_consistency"] = {"saving": p_cons, "ci95": [lo, hi],
+                                  "note": "stop when plurality==full-budget answer (preserves full acc)"}
+    # achievability oracle: stop at earliest correct plurality (fix iter2 #3)
+    ach = ev.oracle_achievable(rows, kmax)
+    cell["oracle_achievable"] = {"saving": ach["saving"], "accuracy": round(ach["accuracy"], 3),
+                                 "note": "stop at earliest correct plurality; acc may exceed full-budget"}
+    cell["oracle"] = cell["oracle_consistency"]  # back-compat key
 
     rcurve = ev.random_stop_curve(rows, kmax=kmax, min_k=min_k, seed=seed)
     ok = [q for q in rcurve if q["accuracy"] >= full_acc - TOL]
     rsav = (round(1 - min(q["mean_cost"] for q in ok) / kmax, 4) if ok else None)
     cell["random_stop"] = {"saving_at_iso_acc": rsav}
 
-    # %-of-oracle for the best real method
+    # %-of-oracle vs the CONSISTENCY oracle — the correct iso-accuracy ceiling for our metric
+    # (our saving is defined at full-budget accuracy; the achievability oracle targets a *higher*
+    # accuracy and is reported separately as accuracy headroom, not as the saving denominator).
+    denom = p_cons
     for group in ("head_to_head_2stage", "incremental"):
         for d in cell[group].values():
-            d["frac_of_oracle"] = (round(d["saving"] / p, 3)
-                                   if d["saving"] is not None and p else None)
+            d["frac_of_oracle_consistency"] = (round(d["saving"] / denom, 3)
+                                               if d["saving"] is not None and denom else None)
     return cell
 
 
@@ -225,14 +253,25 @@ def main():
         s, (lo, hi) = d.get("saving"), d.get("ci95", [None, None])
         return "n.r." if s is None else f"{s:.3f} [{lo:.3f},{hi:.3f}]"
     print("\n=== head-to-head @ k0 (2-stage, matched mechanism) + incremental + yardsticks ===")
-    print("| cell | n | full_acc | agree@k0 | trained@k0 | conf(inc) | esc | oracle | rand |")
+    print("| cell | n | full_acc | agree@k0 | trained@k0 | conf(inc) | esc | orc(cons/ach) | rand |")
     print("|---|--:|--:|---|---|---|---|---|--:|")
     for name, c in out["cells"].items():
         h, inc = c["head_to_head_2stage"], c["incremental"]
         r = c["random_stop"]["saving_at_iso_acc"]
+        orc = f"{c['oracle_consistency']['saving']:.2f}/{c['oracle_achievable']['saving']:.2f}"
         print(f"| {name} | {c['n']} | {c['full_acc']} | {fmt(h.get('agreement',{}))} | "
               f"{fmt(h.get('trained',{}))} | {fmt(inc.get('confidence',{}))} | "
-              f"{fmt(inc.get('esc',{}))} | {fmt(c['oracle'])} | {'n.r.' if r is None else f'{r:.3f}'} |")
+              f"{fmt(inc.get('esc',{}))} | {orc} | {'n.r.' if r is None else f'{r:.3f}'} |")
+    print("\n=== paired Δ (trained − agreement), same problems: TOST @ margin 0.05 ===")
+    print("| cell | Δ | 95% CI | TOST | MDE (½·CI) | censored |")
+    print("|---|--:|---|---|--:|:--:|")
+    for name, c in out["cells"].items():
+        pd = c.get("paired_trained_minus_agreement")
+        if not pd:
+            continue
+        d, (lo, hi) = pd["delta"], pd["ci95"]
+        print(f"| {name} | {d:+.3f} | [{lo:+.3f},{hi:+.3f}] | {pd['tost']} | {pd['mde']:.3f} | "
+              f"{'yes' if pd.get('censored') else 'no'} |")
 
 
 if __name__ == "__main__":

@@ -1,41 +1,45 @@
-"""Bootstrap confidence intervals over problems (see CRITIQUE_LOG iter 1, fixes #2/#4).
+"""Paired-difference bootstrap, equivalence (TOST), and power helpers.
 
-The saving metric involves a data-dependent operating-point selection (cheapest threshold that
-reaches full-budget accuracy), so we bootstrap the WHOLE procedure: resample problems with
-replacement, recompute full-budget accuracy, re-select the operating point, recompute saving.
-This captures both sampling and selection variance.
+CRITIQUE_LOG iter 2 #1: two adaptive signals are evaluated on the SAME problems, so their
+difference must be tested with a PAIRED bootstrap (identical resample indices), not by asking
+whether two marginal CIs overlap. And "we found a tie" must be an equivalence claim (TOST against a
+margin) or an explicit power/MDE statement — not merely "failure to reject".
 """
-import random
+import numpy as np
 
 
-def bootstrap_ci(rows, stat_fn, B=2000, seed=0, alpha=0.05):
-    """Percentile bootstrap CI for stat_fn(rows_resample).
+def paired_delta(saving_fn_a, saving_fn_b, n, B=2000, seed=0, margin=0.05):
+    """Paired bootstrap of Δ = b − a where each saving_fn maps an index array -> saving (or None).
 
-    Returns (point, lo, hi, n_valid). point = stat on the full sample; lo/hi = (alpha/2, 1-alpha/2)
-    percentiles over B resamples. stat_fn may return None (e.g. no threshold reaches the bar);
-    such draws are dropped and counted via n_valid.
+    Returns dict: point Δ, 95% CI, 90% CI (for TOST), TOST verdict vs ±margin, and the achieved
+    half-width (an empirical minimum-detectable-effect for this cell/n). Draws that yield None for
+    either method are dropped (both use the SAME indices, so pairing is preserved).
     """
-    point = stat_fn(rows)
-    rng = random.Random(seed)
-    n = len(rows)
-    vals = []
+    rng = np.random.default_rng(seed)
+    full = np.arange(n)
+    pa, pb = saving_fn_a(full), saving_fn_b(full)
+    point = None if (pa is None or pb is None) else pb - pa
+    deltas = []
     for _ in range(B):
-        sample = [rows[rng.randrange(n)] for _ in range(n)]
-        v = stat_fn(sample)
-        if v is not None:
-            vals.append(v)
-    if not vals:
-        return (point, None, None, 0)
-    vals.sort()
-    lo = vals[int((alpha / 2) * len(vals))]
-    hi = vals[min(len(vals) - 1, int((1 - alpha / 2) * len(vals)))]
-    return (point, lo, hi, len(vals))
-
-
-def ci_overlap(a, b):
-    """True if two (lo, hi) intervals overlap. None-safe (returns True if either is undefined —
-    i.e. we cannot claim separation)."""
-    (alo, ahi), (blo, bhi) = a, b
-    if None in (alo, ahi, blo, bhi):
-        return True
-    return not (ahi < blo or bhi < alo)
+        idx = rng.integers(0, n, size=n)
+        a, b = saving_fn_a(idx), saving_fn_b(idx)
+        if a is not None and b is not None:
+            deltas.append(b - a)
+    if not deltas:
+        return {"delta": point, "ci95": [None, None], "ci90": [None, None],
+                "tost": "undefined", "mde": None, "boot_valid": 0}
+    d = np.sort(np.array(deltas))
+    lo95, hi95 = float(d[int(0.025 * len(d))]), float(d[min(len(d) - 1, int(0.975 * len(d)))])
+    lo90, hi90 = float(d[int(0.05 * len(d))]), float(d[min(len(d) - 1, int(0.95 * len(d)))])
+    # TOST: equivalent iff the 90% CI lies entirely within (-margin, +margin)
+    if lo90 > -margin and hi90 < margin:
+        verdict = "equivalent"
+    elif lo95 > 0 or hi95 < 0:
+        verdict = "different"          # 95% CI excludes 0
+    else:
+        verdict = "inconclusive"       # neither equivalent nor different -> underpowered
+    return {"delta": None if point is None else round(point, 4),
+            "ci95": [round(lo95, 4), round(hi95, 4)],
+            "ci90": [round(lo90, 4), round(hi90, 4)],
+            "tost_margin": margin, "tost": verdict,
+            "mde": round((hi95 - lo95) / 2, 4), "boot_valid": len(deltas)}

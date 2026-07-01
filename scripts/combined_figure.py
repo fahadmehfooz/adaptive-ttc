@@ -68,27 +68,27 @@ def main():
     axA.set_ylim(0, 1)
     axA.legend(fontsize=7, loc="upper left")
 
-    # --- Panel B: transfer @ 1.5B, matched mechanism (agreement@k0 vs trained@k0) ---
+    # --- Panel B: paired Δ (trained − agreement), same problems, 95% CI + equivalence band ---
     cells = A["cells"]
-    order_t = [("gsm8k_qwen-1.5b", "GSM8K\n(in-dist)"),
-               ("math500_qwen-1.5b", "MATH-500"),
-               ("bbh_qwen-1.5b", "BBH")]
-    present = [(k, l) for k, l in order_t if k in cells]
-    xs = range(len(present))
-    w = 0.38
-    for off, sig, color, lab in [(-w / 2, "agreement", "tab:blue", "agreement@k0"),
-                                 (w / 2, "trained", "tab:orange", "trained gate@k0")]:
-        vals, errs = [], [[], []]
-        for k, _ in present:
-            v, e = _err(cells[k]["head_to_head_2stage"].get(sig, {}))
-            vals.append(v if v is not None else 0)
-            errs[0].append(e[0][0] if e else 0)
-            errs[1].append(e[1][0] if e else 0)
-        axB.bar([x + off for x in xs], vals, w, yerr=errs, capsize=3, color=color, label=lab)
-    axB.set_xticks(list(xs))
+    order_t = [("gsm8k_qwen-0.5b", "GSM8K\n0.5B"), ("gsm8k_qwen-1.5b", "GSM8K\n1.5B"),
+               ("math500_qwen-1.5b", "MATH\n1.5B"), ("bbh_qwen-1.5b", "BBH\n1.5B")]
+    present = [(k, l) for k, l in order_t if k in cells and
+               cells[k].get("paired_trained_minus_agreement", {}).get("delta") is not None]
+    xs = list(range(len(present)))
+    deltas, errs = [], [[], []]
+    for k, _ in present:
+        pd = cells[k]["paired_trained_minus_agreement"]
+        d, (lo, hi) = pd["delta"], pd["ci95"]
+        deltas.append(d)
+        errs[0].append(d - lo)
+        errs[1].append(hi - d)
+    axB.axhspan(-0.05, 0.05, color="tab:green", alpha=0.12, label="±0.05 equivalence margin")
+    axB.axhline(0, color="gray", lw=1)
+    axB.errorbar(xs, deltas, yerr=errs, fmt="o", color="tab:purple", capsize=4)
+    axB.set_xticks(xs)
     axB.set_xticklabels([l for _, l in present], fontsize=8)
-    axB.set_ylabel("compute saving @ k0 (2-stage)")
-    axB.set_title("(b) Matched mechanism: mostly ties (95% CI)")
+    axB.set_ylabel("Δ saving: trained − agreement (paired)")
+    axB.set_title("(b) All comparisons inconclusive (95% CI ≫ margin)")
     axB.legend(fontsize=7, loc="upper right")
 
     # --- Panel C: calibration ECE at K=16 with CIs ---
@@ -100,14 +100,15 @@ def main():
     errs = [[r["ece_raw"] - r["ece_raw_ci95"][0] for r in rows],
             [r["ece_raw_ci95"][1] - r["ece_raw"] for r in rows]]
     colors = ["tab:red" if r["dataset"] == "gsm8k" else "tab:purple" for r in rows]
-    axC.bar(range(len(rows)), eces, yerr=errs, capsize=3, color=colors)
+    axC.bar(range(len(rows)), eces, yerr=errs, capsize=3, color=colors, label="raw ECE")
+    iso = [r.get("ece_isotonic") for r in rows]
+    axC.plot(range(len(rows)), iso, "kD", markersize=6, label="ECE after isotonic")
     axC.axhline(0.1, ls="--", color="gray", lw=1)
-    axC.text(len(rows) - 0.5, 0.105, "well-calibrated (<.10)", ha="right", va="bottom",
-             fontsize=7, color="gray")
     axC.set_xticks(range(len(rows)))
     axC.set_xticklabels(cats, fontsize=7)
     axC.set_ylabel("ECE of agreement signal (K=16)")
-    axC.set_title("(c) Miscalibration is task-shaped (95% CI)")
+    axC.set_title("(c) Raw ECE = share≠prob; monotone map removes it")
+    axC.legend(fontsize=7, loc="upper left")
 
     fig.tight_layout()
     out = os.path.join(config.FIGURES_DIR, "combined_results.png")

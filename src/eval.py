@@ -131,6 +131,33 @@ def oracle_bound(rows, kmax=16):
             "saving": round(1 - (cost / n) / kmax, 3)}
 
 
+def oracle_achievable(rows, kmax=16):
+    """Achievability oracle upper bound: for each problem stop at the smallest k whose plurality
+    answer is CORRECT (if any prefix is ever correct), else pay kmax. Accuracy can EXCEED fixed@kmax
+    (it is the best any early-stop policy could do); its saving is the true achievable ceiling, unlike
+    `oracle_bound` which only preserves the full-budget answer (a weaker 'consistency' oracle)."""
+    correct = cost = 0
+    for r in rows:
+        s = r["samples"]
+        stop_k, stop_correct = kmax, _majority_correct(s[:kmax])
+        for j in range(1, kmax + 1):
+            ans, _ = gate.majority([x["answer"] for x in s[:j]])
+            if ans is None:
+                continue
+            jc = False
+            for x in s[:j]:
+                if x["answer"] == ans:
+                    jc = bool(x["correct"]); break
+            if jc:
+                stop_k, stop_correct = j, True
+                break
+        correct += stop_correct
+        cost += stop_k
+    n = len(rows)
+    return {"policy": "oracle-achievable", "mean_cost": cost / n, "accuracy": correct / n,
+            "saving": round(1 - (cost / n) / kmax, 3)}
+
+
 def random_stop_curve(rows, kmax=16, min_k=2, seed=0, reps=20, probs=None):
     """Control: stop early (at min_k) with probability p, else go to kmax — no signal used.
     Averaged over `reps` random assignments. Returns cost-accuracy points; a method that beats
