@@ -83,6 +83,81 @@ def confidence_sweep(rows, kmax=16, min_k=2, thresholds=None):
     return pts
 
 
+def confidence_sweep_incremental(rows, kmax=16, min_k=2, thresholds=None):
+    """Alias kept explicit: incremental agreement-threshold stop. Same signal as the 2-stage
+    agreement policy, but on the common incremental schedule (see mechanism note in S4)."""
+    return confidence_sweep(rows, kmax=kmax, min_k=min_k, thresholds=thresholds)
+
+
+def trained_gate_sweep_incremental(rows, gate_model, min_k=2, kmax=16, thresholds=None):
+    """Trained gate on the SAME incremental schedule as confidence/ESC (draw one at a time; once
+    >= min_k drawn, stop if P(correct | features of drawn) >= t). Removes the 2-stage k0 ceiling
+    confound so methods are compared under matched stopping mechanics."""
+    if thresholds is None:
+        thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
+    pts = []
+    for t in thresholds:
+        correct = cost = 0
+        for r in rows:
+            c, k = _incremental(
+                r["samples"], kmax,
+                lambda d, t=t: gate_model.predict_proba(gate.features(d)) >= t, min_k=min_k)
+            correct += c
+            cost += k
+        n = len(rows)
+        pts.append({"policy": "adaptive-trained", "threshold": t,
+                    "mean_cost": cost / n, "accuracy": correct / n})
+    return pts
+
+
+def oracle_bound(rows, kmax=16):
+    """Matched-accuracy oracle upper bound on saving: for each problem stop at the smallest k whose
+    plurality answer already equals the full-budget (K=kmax) plurality answer. Accuracy is identical
+    to fixed@kmax by construction; the cost is the theoretical floor at that accuracy."""
+    correct = cost = 0
+    for r in rows:
+        s = r["samples"]
+        final, _ = gate.majority([x["answer"] for x in s[:kmax]])
+        k = kmax
+        for j in range(1, kmax + 1):
+            ans, _ = gate.majority([x["answer"] for x in s[:j]])
+            if ans == final and ans is not None:
+                k = j
+                break
+        correct += _majority_correct(s[:kmax])  # oracle keeps full-budget answer
+        cost += k
+    n = len(rows)
+    return {"policy": "oracle", "mean_cost": cost / n, "accuracy": correct / n,
+            "saving": round(1 - (cost / n) / kmax, 3)}
+
+
+def random_stop_curve(rows, kmax=16, min_k=2, seed=0, reps=20, probs=None):
+    """Control: stop early (at min_k) with probability p, else go to kmax — no signal used.
+    Averaged over `reps` random assignments. Returns cost-accuracy points; a method that beats
+    this curve at matched cost is using real signal, not just early-stopping some fraction."""
+    import random
+    if probs is None:
+        probs = [i / 10 for i in range(0, 11)]  # 0.0 .. 1.0
+    rng = random.Random(seed)
+    n = len(rows)
+    pts = []
+    for p in probs:
+        acc_sum = cost_sum = 0.0
+        for _ in range(reps):
+            correct = cost = 0
+            for r in rows:
+                s = r["samples"]
+                if rng.random() < p:
+                    correct += _majority_correct(s[:min_k]); cost += min_k
+                else:
+                    correct += _majority_correct(s[:kmax]); cost += kmax
+            acc_sum += correct / n
+            cost_sum += cost / n
+        pts.append({"policy": "random-stop", "p": p,
+                    "mean_cost": cost_sum / reps, "accuracy": acc_sum / reps})
+    return pts
+
+
 def adaptive(rows, decide, k0, kmax):
     """Adaptive policy. `decide(first_k0_samples) -> bool (stop)`.
     Stop -> answer from first k0 (cost k0); else answer from kmax (cost kmax)."""

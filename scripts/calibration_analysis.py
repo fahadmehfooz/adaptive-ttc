@@ -46,7 +46,20 @@ def _parse_name(path):
     return dataset, model
 
 
-def analyze_file(path, budgets):
+def _ece_ci(confs, labels, n_bins=10, B=2000, seed=0, alpha=0.05):
+    """Percentile-bootstrap CI for ECE over problems (fix #5)."""
+    import random
+    rng = random.Random(seed)
+    n = len(confs)
+    vals = []
+    for _ in range(B):
+        idx = [rng.randrange(n) for _ in range(n)]
+        vals.append(ece([confs[i] for i in idx], [labels[i] for i in idx], n_bins))
+    vals.sort()
+    return (round(vals[int(alpha / 2 * B)], 3), round(vals[min(B - 1, int((1 - alpha / 2) * B))], 3))
+
+
+def analyze_file(path, budgets, B=2000, seed=0):
     rows = load_rollouts(path)
     dataset, model = _parse_name(path)
     out = []
@@ -59,6 +72,9 @@ def analyze_file(path, budgets):
             labels.append(int(_majority_correct(head)))
         n = len(rows)
         ece_raw = ece(confs, labels)
+        ci_lo, ci_hi = _ece_ci(confs, labels, n_bins=10, B=B, seed=seed)
+        # bin-count robustness (fix #5): ECE is not an artifact of one bin choice
+        ece_bins = {b: round(ece(confs, labels, b), 3) for b in (5, 10, 15)}
         # temperature scaling on the confidence logits
         logits = [_logit(c) for c in confs]
         T = temperature_scale(logits, labels)
@@ -69,11 +85,15 @@ def analyze_file(path, budgets):
             "mean_confidence": sum(confs) / n,
             "accuracy": sum(labels) / n,
             "ece_raw": ece_raw,
+            "ece_raw_ci95": [ci_lo, ci_hi],
+            "ece_by_bins": ece_bins,
             "temperature": T,
             "ece_scaled": ece_scaled,
         })
         diagrams[k] = (confs, labels)
-        log(f"{dataset:8s} {model:10s} k={k:2d}  ECE {ece_raw:.3f} -> {ece_scaled:.3f} (T={T:.2f})  acc {sum(labels)/n:.3f}")
+        log(f"{dataset:8s} {model:10s} k={k:2d}  ECE {ece_raw:.3f} [{ci_lo:.3f},{ci_hi:.3f}] "
+            f"bins(5/10/15)={ece_bins[5]}/{ece_bins[10]}/{ece_bins[15]} -> T-scaled {ece_scaled:.3f} "
+            f"(T={T:.2f})  acc {sum(labels)/n:.3f}")
     return out, diagrams
 
 
@@ -161,12 +181,14 @@ def main():
         log(f"wrote {saved}")
 
     # markdown summary to stdout
-    print("\n| dataset | model | k | n | mean_conf | acc | ECE | ECE(T) | T |")
-    print("|---|---|--:|--:|--:|--:|--:|--:|--:|")
+    print("\n| dataset | model | k | n | mean_conf | acc | ECE [95% CI] | ECE 5/10/15 bins | ECE(T) | T |")
+    print("|---|---|--:|--:|--:|--:|---|---|--:|--:|")
     for r in grid:
+        lo, hi = r["ece_raw_ci95"]
+        eb = r["ece_by_bins"]
         print(f"| {r['dataset']} | {r['model']} | {r['k']} | {r['n']} | "
-              f"{r['mean_confidence']:.3f} | {r['accuracy']:.3f} | {r['ece_raw']:.3f} | "
-              f"{r['ece_scaled']:.3f} | {r['temperature']:.2f} |")
+              f"{r['mean_confidence']:.3f} | {r['accuracy']:.3f} | {r['ece_raw']:.3f} [{lo:.3f},{hi:.3f}] | "
+              f"{eb[5]}/{eb[10]}/{eb[15]} | {r['ece_scaled']:.3f} | {r['temperature']:.2f} |")
 
 
 if __name__ == "__main__":
