@@ -82,21 +82,54 @@ def main():
         L.append(f"| {ds} | {model} | {pd['delta']:+.3f} | [{lo:+.3f},{hi:+.3f}] | {pd['tost']} | "
                  f"{pd['mde']:.3f} | {'yes' if pd.get('censored') else 'no'} |")
 
-    # --- subset-matched scale (fix #3) ---
+    # --- subset-matched scale (fix #3) + chain-order-aware CI on the headline confidence saving ---
     if "scale_matched" in A:
         sm = A["scale_matched"]
         L += ["", f"## Scale on the 7B-matched GSM8K subset (n={sm['n_ids']} shared ids)", "",
-              "Removes the sample-size/subset confound in the scale story (precision confound — 7B "
-              "is 4-bit — remains; needs a GPU fp16 run).", "",
-              "| model | full_acc | agree@k0 | trained@k0 | conf(inc) | oracle | random |",
-              "|---|--:|---|---|---|---|--:|"]
+              "Removes the sample-size/subset confound. `CI(chain-order)` also permutes each problem's "
+              "chain arrival order → covers decoding-order variance (§3). The 7B confidence CI stays "
+              "disjoint from the smaller models under it. Remaining confound: 7B is 4-bit vs fp16 "
+              "(needs a GPU fp16 run).", "",
+              "| model | full_acc | conf(inc) | CI(problem) | CI(chain-order) | oracle | random |",
+              "|---|--:|--:|---|---|--:|--:|"]
         for model in sorted(sm["cells"], key=lambda m: MODEL_ORDER.get(m, 9)):
             c = sm["cells"][model]
-            h, inc = c["head_to_head_2stage"], c["incremental"]
+            cf = c["incremental"]["confidence"]
             r = c["random_stop"]["saving_at_iso_acc"]
-            L.append(f"| {model} | {c['full_acc']} | {_fmt(h.get('agreement'))} | "
-                     f"{_fmt(h.get('trained'))} | {_fmt(inc.get('confidence'))} | {_fmt(c['oracle'])} | "
+            plo, phi = cf.get("ci95", [None, None])
+            clo, chi = cf.get("ci95_chainperm", [None, None])
+            pci = "—" if plo is None else f"[{plo:.3f},{phi:.3f}]"
+            cci = "—" if clo is None else f"[{clo:.3f},{chi:.3f}]"
+            sv = "n.r." if cf.get("saving") is None else f"{cf['saving']:.3f}"
+            L.append(f"| {model} | {c['full_acc']} | {sv} | {pci} | {cci} | "
+                     f"{c['oracle_consistency']['saving']:.3f} | "
                      f"{'n.r.' if r is None else f'{r:.3f}'} |")
+
+    # --- the audit in action: naive winner vs audited verdict (novelty demonstration) ---
+    L += ["", "## The audit in action: naive 'winners' vs audited verdicts", "",
+          "Naive = the method with the largest point saving ignoring mechanism/CIs (typical reporting); "
+          "audited = the within-mechanism paired TOST verdict. A naive win that becomes 'inconclusive' "
+          "or crosses a mechanism boundary is a would-be false positive the audit catches.", "",
+          "| dataset | model | naive 'winner' (saving) | mechanism-legit? | audited (paired trained−agree) |",
+          "|---|---|---|:--:|---|"]
+    METHrank = [("confidence", "incremental"), ("agreement", "head_to_head_2stage"),
+                ("trained", "head_to_head_2stage"), ("esc", "incremental")]
+    for name in sorted(A["cells"], key=_cell_key):
+        c = A["cells"][name]
+        ds, _, model = name.partition("_")
+        cands = []
+        for key, grp in METHrank:
+            d = c[grp].get(key)
+            if d and d.get("saving") is not None:
+                cands.append((key, d["saving"]))
+        if not cands:
+            continue
+        win, ws = max(cands, key=lambda x: x[1])
+        legit = "no (cross-schedule)" if win in ("confidence", "esc") else "yes"
+        pd = c.get("paired_trained_minus_agreement")
+        verdict = (f"{pd['tost']} (Δ{pd['delta']:+.3f})" if pd and pd.get("delta") is not None
+                   else "censored/n.a.")
+        L.append(f"| {ds} | {model} | {win} ({ws:.3f}) | {legit} | {verdict} |")
 
     # --- calibration table ---
     cpath = os.path.join(config.RESULTS_DIR, "calibration.json")

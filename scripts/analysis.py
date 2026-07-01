@@ -105,6 +105,81 @@ def _boot_saving(cost, correct, full_correct, kmax, B, seed, tol=TOL):
     return (round(float(point), 4), round(lo, 4), round(hi, 4), len(vals))
 
 
+def _conf_chainperm_ci(rows, kmax, min_k, ts_conf, B, seed):
+    """CI for the incremental-confidence saving under a NESTED bootstrap that resamples problems AND
+    permutes each problem's chain ARRIVAL ORDER. The 16 chains per problem are exchangeable (iid at
+    fixed temperature), so re-ordering them simulates a different decoding run's arrival order — the
+    dominant decoding-variance component for an adaptive stopping rule (which chains come first). This
+    is the CI that answers 'your bootstrap holds the 16 chains fixed': here order is not held fixed.
+    (It still cannot cover chain-*identity* variance — that needs fresh rollouts — stated as such.)"""
+    from collections import Counter
+    n = len(rows)
+    answers = [[x["answer"] for x in r["samples"][:kmax]] for r in rows]
+    corrmap = []
+    for r in rows:
+        m = {}
+        for x in r["samples"][:kmax]:
+            a = x["answer"]
+            if a is not None and a not in m:
+                m[a] = bool(x["correct"])
+        corrmap.append(m)
+    full_correct = np.array([ev._majority_correct(r["samples"][:kmax]) for r in rows], dtype=float)
+    rng = np.random.default_rng(seed)
+
+    def problem_pts(i, order):
+        seq = [answers[i][j] for j in order]
+        cnt = Counter()
+        agr = [0.0] * (len(seq) + 1)
+        plur = [None] * (len(seq) + 1)
+        nn = 0
+        for k in range(1, len(seq) + 1):
+            a = seq[k - 1]
+            if a is not None:
+                cnt[a] += 1
+                nn += 1
+            if nn:
+                top, c = cnt.most_common(1)[0]
+                agr[k], plur[k] = c / nn, top
+        res = {}
+        for t in ts_conf:
+            sk = len(seq)
+            for k in range(min_k, len(seq) + 1):
+                if agr[k] >= t:
+                    sk = k
+                    break
+            pa = plur[sk]
+            res[t] = (sk, 1.0 if (pa is not None and corrmap[i].get(pa, False)) else 0.0)
+        return res
+
+    def draw_saving(idx):
+        agg = {t: [0.0, 0.0] for t in ts_conf}  # t -> [cost_sum, correct_sum]
+        for i in idx:
+            order = rng.permutation(kmax)
+            pts = problem_pts(i, order)
+            for t in ts_conf:
+                c, y = pts[t]
+                agg[t][0] += c
+                agg[t][1] += y
+        full = full_correct[idx].mean()
+        m = len(idx)
+        best = None
+        for t in ts_conf:
+            acc = agg[t][1] / m
+            cost = agg[t][0] / m
+            if acc >= full - TOL:
+                s = 1 - cost / kmax
+                best = s if best is None else max(best, s)
+        return best
+
+    point = draw_saving(np.arange(n))
+    vals = [v for v in (draw_saving(rng.integers(0, n, size=n)) for _ in range(B)) if v is not None]
+    if not vals or point is None:
+        return [None, None]
+    vals = np.sort(np.array(vals))
+    return [round(float(vals[int(0.025 * len(vals))]), 4),
+            round(float(vals[min(len(vals) - 1, int(0.975 * len(vals)))]), 4)]
+
+
 def analyze_cell(rows, model, kmax, k0, min_k, B, seed, gate_dir):
     gp = os.path.join(gate_dir, f"gsm8k_{model}.joblib")
     gate_model = gatemod.TrainedGate.load(gp) if os.path.exists(gp) else None
@@ -211,6 +286,8 @@ def main():
     ap.add_argument("-B", "--bootstrap", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--match-scale", action="store_true")
+    ap.add_argument("--chain-perm-b", type=int, default=1000,
+                    help="bootstrap draws for the chain-order-aware CI on scale cells")
     args = ap.parse_args()
 
     config.ensure_dirs()
@@ -238,11 +315,17 @@ def main():
             keep = {r["id"] for m, rs in gk if m == "qwen-7b" for r in rs}
             log(f"match-scale: restricting GSM8K to {len(keep)} shared 7B ids")
             out["scale_matched"] = {"n_ids": len(keep), "cells": {}}
+            ts_conf = np.array([i / 10 for i in range(5, 11)])
             for m, rs in gk:
                 sub = [r for r in rs if r["id"] in keep]
                 kmax = len(sub[0]["samples"])
-                out["scale_matched"]["cells"][m] = analyze_cell(
+                cell = analyze_cell(
                     sub, m, kmax, args.k0, args.min_k, args.bootstrap, args.seed, config.GATE_DIR)
+                # chain-order-aware CI for the headline confidence saving (fix: decoding-order variance)
+                log(f"match-scale: chain-order bootstrap for {m} (B={args.chain_perm_b}) ...")
+                cell["incremental"]["confidence"]["ci95_chainperm"] = _conf_chainperm_ci(
+                    sub, kmax, args.min_k, ts_conf, args.chain_perm_b, args.seed)
+                out["scale_matched"]["cells"][m] = cell
 
     dest = os.path.join(config.RESULTS_DIR, "analysis.json")
     with open(dest, "w") as f:
